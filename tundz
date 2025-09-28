@@ -1,0 +1,437 @@
+-- ========== 3D OBJECT VERSION (v7.9 - Stable Follow Effect) ==========
+-- Author: tunlove9
+-- v1.1 Functionality:
+-- * EFFECT CHANGE: The UI will now smoothly follow in front of the player,
+--   instead of orbiting around when moving. The new effect is more stable and easier to view.
+-- (Other functionalities from v1.1 remain the same)
+
+-- // --- SERVICES --- //
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+local ContentProvider = game:GetService("ContentProvider")
+
+-- // --- GLOBAL VARIABLES --- //
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- ================== SYSTEM SETTINGS ==================
+-- [[ Custom Settings ]]
+local FRAME_TRANSPARENCY = 0.2 -- Transparency of the UI frame (0=opaque, 1=invisible)
+
+-- [[ Other settings remain the same ]]
+-- THE ORBIT_SPEED VARIABLE IS NO LONGER USED IN THIS VERSION
+local DISTANCE_FROM_CHAR = 6.3
+local VERTICAL_OFFSET = 2.5
+local UI_SIZE_3D = Vector2.new(8, 4.5)
+local PIXELS_PER_STUD = 120
+local BOBBING_SPEED = 2
+local BOBBING_AMPLITUDE = 0.1
+local FOLLOW_SMOOTHNESS = 5
+local FONT_STYLE = Enum.Font.GothamSemibold
+local ACCENT_COLOR = Color3.fromRGB(137, 216, 255)
+local BRIGHT_ACCENT_COLOR = Color3.fromRGB(220, 245, 255)
+local LOG_COLOR_SYSTEM = Color3.fromRGB(255, 238, 173)
+local TEXT_SIZE_MAIN = 28
+local TEXT_SIZE_LOG = 20
+local WHITE_COLOR = Color3.fromRGB(255, 255, 255)
+local BUTTON_COLOR = Color3.fromRGB(28, 32, 46)
+local BUTTON_HOVER_COLOR = Color3.fromRGB(48, 52, 66)
+local AUTO_CLOSE_DELAY = 60
+local FRAME_IMAGE_ID = "rbxassetid://76461774240760" -- Changed to a valid placeholder asset ID
+local GLITCH_INTENSITY = 0.2
+local GLITCH_DURATION = 0.3
+local GLITCH_ARTIFACT_COUNT = 15
+local GLITCH_SOUND_ID = "rbxassetid://139682612" -- Changed to a valid placeholder asset ID
+local CLOSE_SOUND_ID = "rbxassetid://8622488090" -- Changed to a valid placeholder asset ID
+-- ======================================================
+
+-- // --- STATE VARIABLES --- //
+local isVisible = false
+local isDebounce = false
+local hasReadMessage = false
+local pulseTween
+local closingCoroutine = nil
+-- The orbitAngle variable is no longer used
+
+-- ========== OBJECT CREATION (Do not change) ==========
+local buttonGui = Instance.new("ScreenGui")
+buttonGui.Name = "SystemButtonGui"
+buttonGui.ResetOnSpawn = false
+buttonGui.Parent = player:WaitForChild("PlayerGui")
+
+local mButton = Instance.new("TextButton")
+mButton.Name = "M_Button"
+mButton.AnchorPoint = Vector2.new(1, 1)
+mButton.Position = UDim2.new(1, -20, 1, -80)
+mButton.Size = UDim2.new(0, 60, 0, 60)
+mButton.BackgroundColor3 = BUTTON_COLOR
+mButton.Text = "M"
+mButton.Font = Enum.Font.GothamBlack
+mButton.TextColor3 = WHITE_COLOR
+mButton.TextSize = 30
+mButton.Parent = buttonGui
+
+local corner = Instance.new("UICorner", mButton)
+corner.CornerRadius = UDim.new(1, 0)
+
+local stroke = Instance.new("UIStroke", mButton)
+stroke.Color = ACCENT_COLOR
+stroke.Thickness = 2
+
+local uiPart = Instance.new("Part")
+uiPart.Name = "SystemUIPart"
+uiPart.Anchored = true
+uiPart.CanCollide = false
+uiPart.Size = Vector3.new(UI_SIZE_3D.X, UI_SIZE_3D.Y, 0.1)
+uiPart.Transparency = 1
+uiPart.Parent = workspace
+
+local surfaceGuiBack = Instance.new("SurfaceGui")
+surfaceGuiBack.Name = "System3D_Back"
+surfaceGuiBack.AlwaysOnTop = false
+surfaceGuiBack.Face = Enum.NormalId.Back
+surfaceGuiBack.LightInfluence = 0
+surfaceGuiBack.CanvasSize = Vector2.new(UI_SIZE_3D.X * PIXELS_PER_STUD, UI_SIZE_3D.Y * PIXELS_PER_STUD)
+surfaceGuiBack.Enabled = false
+surfaceGuiBack.Parent = uiPart
+
+local surfaceGuiFront = Instance.new("SurfaceGui")
+surfaceGuiFront.Name = "System3D_Front"
+surfaceGuiFront.AlwaysOnTop = false
+surfaceGuiFront.Face = Enum.NormalId.Front
+surfaceGuiFront.LightInfluence = 0
+surfaceGuiFront.CanvasSize = Vector2.new(UI_SIZE_3D.X * PIXELS_PER_STUD, UI_SIZE_3D.Y * PIXELS_PER_STUD)
+surfaceGuiFront.Enabled = false
+surfaceGuiFront.Parent = uiPart
+
+local mainCanvasGroup = Instance.new("CanvasGroup", surfaceGuiBack)
+mainCanvasGroup.Name = "MainCanvas"
+mainCanvasGroup.Size = UDim2.fromScale(1, 1)
+mainCanvasGroup.BackgroundTransparency = 1
+mainCanvasGroup.GroupTransparency = 1
+
+local mainFrame = Instance.new("ImageLabel", mainCanvasGroup)
+mainFrame.Name = "MainFrame"
+mainFrame.Image = FRAME_IMAGE_ID
+mainFrame.ScaleType = Enum.ScaleType.Slice
+mainFrame.SliceCenter = Rect.new(49, 49, 463, 239)
+mainFrame.Size = UDim2.fromScale(1, 1)
+mainFrame.BackgroundTransparency = 1
+mainFrame.ImageTransparency = FRAME_TRANSPARENCY
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.Position = UDim2.fromScale(0.5, 0.5)
+
+local mainMessageFrame = Instance.new("Frame", mainFrame)
+mainMessageFrame.Name = "MainMessageFrame"
+mainMessageFrame.Size = UDim2.new(1, 0, 0.4, 0)
+mainMessageFrame.BackgroundTransparency = 1
+
+local messageLabel = Instance.new("TextLabel", mainMessageFrame)
+messageLabel.Name = "MessageLabel"
+messageLabel.Size = UDim2.fromScale(0.9, 0.9)
+messageLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+messageLabel.Position = UDim2.fromScale(0.5, 0.5)
+messageLabel.BackgroundTransparency = 1
+messageLabel.Font = FONT_STYLE
+messageLabel.TextColor3 = ACCENT_COLOR
+messageLabel.TextSize = TEXT_SIZE_MAIN
+messageLabel.TextWrapped = true
+
+local questLabel = Instance.new("TextLabel", mainMessageFrame)
+questLabel.Name = "QuestLabel"
+questLabel.Size = UDim2.fromScale(0.9, 0.9)
+questLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+questLabel.Position = UDim2.fromScale(0.5, 0.5)
+questLabel.BackgroundTransparency = 1
+questLabel.Font = FONT_STYLE
+questLabel.TextColor3 = ACCENT_COLOR
+questLabel.TextSize = TEXT_SIZE_MAIN
+questLabel.TextWrapped = true
+questLabel.Text = "New Quest:\nNone."
+questLabel.Visible = false
+
+local messageClickArea = Instance.new("TextButton", mainMessageFrame)
+messageClickArea.Name = "MessageClickArea"
+messageClickArea.Size = UDim2.fromScale(1, 1)
+messageClickArea.BackgroundTransparency = 1
+messageClickArea.Text = ""
+
+local logFrame = Instance.new("ScrollingFrame", mainFrame)
+logFrame.Name = "LogFrame"
+logFrame.Size = UDim2.new(0.95, 0, 0.55, 0)
+logFrame.AnchorPoint = Vector2.new(0.5, 0)
+logFrame.Position = UDim2.fromScale(0.5, 0.45)
+logFrame.BackgroundTransparency = 0.8
+logFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+logFrame.BorderSizePixel = 0
+logFrame.ScrollBarImageColor3 = ACCENT_COLOR
+logFrame.ScrollBarThickness = 6
+
+local uiListLayout = Instance.new("UIListLayout", logFrame)
+uiListLayout.Padding = UDim.new(0, 5)
+uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local logTemplate = Instance.new("TextLabel", logFrame)
+logTemplate.Name = "LogTemplate"
+logTemplate.Size = UDim2.new(1, -10, 0, 30)
+logTemplate.BackgroundTransparency = 1
+logTemplate.Font = FONT_STYLE
+logTemplate.TextSize = TEXT_SIZE_LOG
+logTemplate.TextColor3 = WHITE_COLOR
+logTemplate.TextXAlignment = Enum.TextXAlignment.Left
+logTemplate.TextWrapped = true
+logTemplate.Visible = false
+
+local frontCanvasGroup = Instance.new("CanvasGroup", surfaceGuiFront)
+frontCanvasGroup.Name = "FrontCanvas"
+frontCanvasGroup.Size = UDim2.fromScale(1, 1)
+frontCanvasGroup.BackgroundTransparency = 1
+frontCanvasGroup.GroupTransparency = 1
+
+local frontImage = Instance.new("ImageLabel", frontCanvasGroup)
+frontImage.Name = "FrontFaceImage"
+frontImage.Image = FRAME_IMAGE_ID
+frontImage.ScaleType = Enum.ScaleType.Slice
+frontImage.SliceCenter = mainFrame.SliceCenter
+frontImage.Size = UDim2.fromScale(1, 1)
+frontImage.BackgroundTransparency = 1
+frontImage.ImageTransparency = FRAME_TRANSPARENCY
+frontImage.AnchorPoint = Vector2.new(0.5, 0.5)
+frontImage.Position = UDim2.fromScale(0.5, 0.5)
+
+local clickDetector = Instance.new("ClickDetector", uiPart)
+clickDetector.MaxActivationDistance = 0
+local glitchSound = Instance.new("Sound", uiPart)
+glitchSound.SoundId = GLITCH_SOUND_ID
+local closeSound = Instance.new("Sound", uiPart)
+closeSound.SoundId = CLOSE_SOUND_ID
+
+-- // --- LOGIC FUNCTIONS (Do not change) --- //
+local textFadeInfo = TweenInfo.new(0.2, Enum.EasingStyle.Linear)
+local pulseInfo = TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+local buttonTweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+function addLogEntry(text, color)
+	local newEntry = logTemplate:Clone()
+	newEntry.TextColor3 = color or ACCENT_COLOR
+	newEntry.Text = string.format("[%s] %s", os.date("%X"), text)
+	newEntry.Visible = true
+	newEntry.Parent = logFrame
+	task.wait()
+	logFrame.CanvasPosition = Vector2.new(0, logFrame.CanvasSize.Y.Offset)
+end
+
+function stopPulseEffect()
+	if pulseTween and pulseTween.PlaybackState == Enum.PlaybackState.Playing then
+		pulseTween:Cancel()
+	end
+	messageLabel.TextColor3 = ACCENT_COLOR
+end
+
+function startPulseEffect()
+	stopPulseEffect()
+	pulseTween = TweenService:Create(messageLabel, pulseInfo, {TextColor3 = BRIGHT_ACCENT_COLOR})
+	pulseTween:Play()
+end
+
+function scheduleAutoClose()
+	task.delay(AUTO_CLOSE_DELAY, function()
+		if isVisible then toggleWindow() end
+	end)
+end
+
+function playCRTFadeOutEffect()
+	closeSound:Play()
+
+	local verticalCollapseInfo = TweenInfo.new(0.2, Enum.EasingStyle.Cubic, Enum.EasingDirection.In)
+	local verticalCollapseMain = TweenService:Create(mainFrame, verticalCollapseInfo, {Size = UDim2.fromScale(1, 0.015)})
+	local verticalCollapseFront = TweenService:Create(frontImage, verticalCollapseInfo, {Size = UDim2.fromScale(1, 0.015)})
+	verticalCollapseMain:Play()
+	verticalCollapseFront:Play()
+	verticalCollapseMain.Completed:Wait()
+
+	local horizontalCollapseInfo = TweenInfo.new(0.3, Enum.EasingStyle.Linear)
+	local horizontalCollapseMain = TweenService:Create(mainFrame, horizontalCollapseInfo, {Size = UDim2.fromScale(0, 0.015)})
+	local horizontalCollapseFront = TweenService:Create(frontImage, horizontalCollapseInfo, {Size = UDim2.fromScale(0, 0.015)})
+	horizontalCollapseMain:Play()
+	horizontalCollapseFront:Play()
+	horizontalCollapseMain.Completed:Wait()
+
+	mainCanvasGroup.GroupTransparency = 1
+	frontCanvasGroup.GroupTransparency = 1
+end
+
+function playOpenGlitchEffect()
+	isDebounce = true
+
+	local glitchArtifacts = {}
+	for i = 1, GLITCH_ARTIFACT_COUNT do
+		local artifact = Instance.new("Frame", mainCanvasGroup)
+		artifact.BackgroundColor3 = math.random() > 0.5 and ACCENT_COLOR or WHITE_COLOR
+		artifact.BorderSizePixel = 0
+		artifact.ZIndex = 10
+		table.insert(glitchArtifacts, artifact)
+	end
+
+	surfaceGuiBack.Enabled = true
+	surfaceGuiFront.Enabled = true
+	mainCanvasGroup.GroupTransparency = 1
+	frontCanvasGroup.GroupTransparency = 1
+	mainFrame.Size = UDim2.fromScale(1, 1)
+	frontImage.Size = UDim2.fromScale(1, 1)
+
+	glitchSound:Play()
+	local startTime = tick()
+
+	while tick() - startTime < GLITCH_DURATION do
+		local randomTransparency = math.random() * 0.7 + 0.1
+		mainCanvasGroup.GroupTransparency = randomTransparency
+		frontCanvasGroup.GroupTransparency = randomTransparency
+
+		local randomOffset = CFrame.new((math.random()-0.5)*GLITCH_INTENSITY, (math.random()-0.5)*GLITCH_INTENSITY, 0)
+		uiPart.CFrame = uiPart.CFrame * randomOffset
+
+		for _, artifact in ipairs(glitchArtifacts) do
+			artifact.Visible = math.random() > 0.4
+			artifact.Position = UDim2.fromScale(math.random(), math.random())
+			artifact.Size = UDim2.fromScale(math.random() * 0.2, math.random() * 0.05)
+			artifact.BackgroundTransparency = math.random() * 0.5
+		end
+		RunService.Heartbeat:Wait()
+	end
+
+	for _, artifact in ipairs(glitchArtifacts) do
+		artifact:Destroy()
+	end
+
+	local finalFadeIn = TweenInfo.new(0.1)
+	TweenService:Create(mainCanvasGroup, finalFadeIn, {GroupTransparency = 0}):Play()
+	TweenService:Create(frontCanvasGroup, finalFadeIn, {GroupTransparency = 0}):Play()
+
+	isDebounce = false
+end
+
+function toggleWindow()
+	if isDebounce then return end
+
+	if closingCoroutine then
+		task.cancel(closingCoroutine)
+		closingCoroutine = nil
+	end
+
+	isVisible = not isVisible
+	stopPulseEffect()
+
+	if isVisible then
+		clickDetector.MaxActivationDistance = 30
+		if hasReadMessage then
+			messageLabel.Text = "No new messages."
+			questLabel.Visible = false
+			scheduleAutoClose()
+		else
+			messageLabel.Text = "❗️You have an unread message."
+			startPulseEffect()
+		end
+		questLabel.Visible = false
+		messageLabel.TextTransparency = 0
+		playOpenGlitchEffect()
+	else
+		clickDetector.MaxActivationDistance = 0
+		closingCoroutine = task.spawn(function()
+			isDebounce = true
+			playCRTFadeOutEffect()
+			surfaceGuiBack.Enabled = false
+			surfaceGuiFront.Enabled = false
+			isDebounce = false
+			closingCoroutine = nil
+		end)
+	end
+end
+
+function onMessageClick()
+	if not hasReadMessage and isVisible then
+		hasReadMessage = true
+		stopPulseEffect()
+		addLogEntry("Message read.", LOG_COLOR_SYSTEM)
+		addLogEntry("New Quest: none.", ACCENT_COLOR)
+		local fadeOut = TweenService:Create(messageLabel, textFadeInfo, {TextTransparency = 1})
+		local fadeIn = TweenService:Create(questLabel, textFadeInfo, {TextTransparency = 0})
+
+		fadeOut.Completed:Connect(function()
+			messageLabel.TextTransparency = 1
+		end)
+
+		questLabel.Visible = true
+		questLabel.TextTransparency = 1
+		fadeOut:Play()
+		fadeIn:Play()
+		scheduleAutoClose()
+	end
+end
+
+-- // --- MAIN LOOP (FOLLOW LOGIC HAS BEEN CHANGED) --- //
+RunService.RenderStepped:Connect(function(deltaTime)
+	local character = player.Character
+	if not character then return end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+
+	if rootPart and (isVisible or closingCoroutine) then
+		-- [[ NEW LOGIC v7.9 ]]: UI always follows stably in front of the player
+		-- Whether moving or standing still, the UI will maintain its position in front.
+		local bobbingOffset = math.sin(tick() * BOBBING_SPEED) * BOBBING_AMPLITUDE
+		local targetCFrame = rootPart.CFrame * CFrame.new(0, VERTICAL_OFFSET + bobbingOffset, -DISTANCE_FROM_CHAR)
+
+		-- Smoothly move the UI to the target position
+		if not isDebounce then
+			local alpha = math.clamp(deltaTime * FOLLOW_SMOOTHNESS, 0, 1)
+			uiPart.CFrame = uiPart.CFrame:Lerp(targetCFrame, alpha)
+		elseif isVisible then
+			-- When glitching, only update the CFrame to avoid conflicting with the shake effect
+			uiPart.CFrame = targetCFrame
+		end
+	end
+end)
+
+-- // --- EVENT CONNECTIONS (Do not change) --- //
+UserInputService.InputBegan:Connect(function(input, gpe)
+	if gpe then return end
+	if input.KeyCode == Enum.KeyCode.M then
+		toggleWindow()
+	end
+end)
+
+mButton.MouseEnter:Connect(function()
+	TweenService:Create(mButton, buttonTweenInfo, {BackgroundColor3 = BUTTON_HOVER_COLOR}):Play()
+end)
+
+mButton.MouseLeave:Connect(function()
+	TweenService:Create(mButton, buttonTweenInfo, {BackgroundColor3 = BUTTON_COLOR}):Play()
+end)
+
+mButton.MouseButton1Down:Connect(function()
+	TweenService:Create(mButton, TweenInfo.new(0.1), {Size = UDim2.new(0, 55, 0, 55)}):Play()
+end)
+
+mButton.MouseButton1Up:Connect(function()
+	TweenService:Create(mButton, TweenInfo.new(0.1), {Size = UDim2.new(0, 60, 0, 60)}):Play()
+end)
+
+mButton.MouseButton1Click:Connect(toggleWindow)
+clickDetector.MouseClick:Connect(toggleWindow)
+messageClickArea.MouseButton1Click:Connect(onMessageClick)
+
+-- // --- SYSTEM INITIALIZATION & PRELOAD ASSETS --- //
+local assetsToLoad = {
+	FRAME_IMAGE_ID,
+	GLITCH_SOUND_ID,
+	CLOSE_SOUND_ID
+}
+pcall(function()
+	ContentProvider:PreloadAsync(assetsToLoad)
+end)
+
+addLogEntry("The system has started successfully. [v1.1]", LOG_COLOR_SYSTEM)
